@@ -1,0 +1,9 @@
+displayName: Trace ID Plugin
+type: middleware
+
+import: github.com/anon-d/trace_plugin
+
+summary: "Adds unique trace ID to each request"
+
+testData:
+    headerName: X-Trace-Id
