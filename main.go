@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -43,6 +44,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 // ServeHTTP обрабатывает HTTP запросы
 func (t *TraceIDPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+
+	startTime := time.Now()
 	// Проверяем, есть ли уже trace_id в заголовках
 	traceID := req.Header.Get(t.headerName)
 
@@ -53,23 +56,32 @@ func (t *TraceIDPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	// Добавляем trace_id в response headers
-	rw.Header().Set(t.headerName, traceID)
+	// rw.Header().Set(t.headerName, traceID)
 
 	// Добавляем trace_id в контекст для использования в приложении
 	ctx := context.WithValue(req.Context(), "trace_id", traceID)
 	req = req.WithContext(ctx)
 
-	// Структурированное логирование
-	fmt.Printf(`{"trace_id":"%s","method":"%s","path":"%s","remote_addr":"%s","user_agent":"%s","timestamp":"%s"}`,
-		traceID, req.Method, req.URL.Path, req.RemoteAddr,
-		req.Header.Get("User-Agent"), req.Header.Get("X-Forwarded-For"))
-	fmt.Println()
+	logData := map[string]interface{}{
+		"trace_id":        traceID,
+		"method":          req.Method,
+		"path":            req.URL.Path,
+		"remote_addr":     req.RemoteAddr,
+		"user_agent":      req.Header.Get("User-Agent"),
+		"x_forwarded_for": req.Header.Get("X-Forwarded-For"),  // ip клиента
+		"timestamp":       startTime.Format(time.RFC3339Nano), // Корректная временная метка
+	}
+	fmt.Printf("%s\n", formatJSON(logData))
 
 	// Передаем управление следующему middleware
 	t.next.ServeHTTP(rw, req)
+
+	endTime := time.Now()
+	logData["timestamp"] = endTime.Format(time.RFC3339Nano)
+	logData["response_time"] = strconv.Itoa(int(endTime.Sub(startTime).Milliseconds())) + " ms"
+	fmt.Printf("%s\n", formatJSON(logData))
 }
 
-// generateTraceID генерирует уникальный trace ID
 func generateTraceID() string {
 	// Используем crypto/rand для безопасной генерации
 	bytes := make([]byte, 16)
@@ -78,4 +90,19 @@ func generateTraceID() string {
 		return fmt.Sprintf("trace-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(bytes)
+}
+
+func formatJSON(data map[string]interface{}) string {
+	var s string
+	s = "{"
+	first := true
+	for k, v := range data {
+		if !first {
+			s += ","
+		}
+		s += fmt.Sprintf(`"%s":"%v"`, k, v)
+		first = false
+	}
+	s += "}"
+	return s
 }
